@@ -1,0 +1,45 @@
+name: Gerar BaixadorDANFE.exe
+
+# Compila o executavel Windows na nuvem do GitHub.
+# NECESSARIO NENHUM PYTHON instalado na sua maquina.
+#
+# Como usar:
+#   1. Coloque este arquivo em .github/workflows/ dentro do repositorio.
+#   2. Faca push para o GitHub (ou use "Actions > Run workflow").
+#   3. Em "Actions" > "Gerar BaixadorDANFE.exe" > abra o build e baixe o
+#      artefato "BaixadorDANFE" - la estara o arquivo BaixadorDANFE.exe.
+
+on:
+  workflow_dispatch:   # disparo manual pelo botao "Run workflow"
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar codigo-fonte
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias e PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Compilar executavel (onefile, sem console)
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name BaixadorDANFE `
+            --collect-all customtkinter `
+            main.py
+
+      - name: Disponibilizar artefato (BaixadorDANFE.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: BaixadorDANFE
+          path: dist/BaixadorDANFE.exe
