@@ -20,6 +20,7 @@ import api_client
 import chave
 import config
 import downloads
+import proxies
 import report
 
 ctk.set_appearance_mode("system")
@@ -194,6 +195,38 @@ class Aplicacao(ctk.CTk):
         return valor
 
     # =========================================================================
+    # Renovação automática de proxies
+    # =========================================================================
+    def _consultar_com_renovacao(self, acesso: str) -> dict:
+        """Consulta a chave e, se o limite esgotar, renova os proxies grátis.
+
+        Quando todos os proxies atuais atingem o limite (rate limit "duro"),
+        busca novas listas grátis, grava em proxies.txt e tenta a mesma chave
+        de novo — evitando parar o lote por causa do limite diário por IP.
+        """
+        resposta = api_client.consultar_danfe(acesso)
+        if not (config.USAR_PROXIES and config.AUTO_RENOVAR_PROXIES):
+            return resposta
+
+        renovacoes = 0
+        while (
+            resposta.get("codigo") == "rate_limit_longo"
+            and renovacoes < config.MAX_RENOVACOES_POR_CHAVE
+        ):
+            renovacoes += 1
+            self._fila.put(("aviso", "Ajustando conexão, aguarde..."))
+            try:
+                aprovados = proxies.buscar_proxies_gratis()
+            except Exception:  # noqa: BLE001 — busca nunca derruba o lote
+                break
+            if not aprovados:
+                break
+            proxies.salvar_proxies(aprovados)
+            proxies.obter_gerenciador().carregar()
+            resposta = api_client.consultar_danfe(acesso)
+        return resposta
+
+    # =========================================================================
     # Laço de processamento
     # =========================================================================
     def _iniciar_processamento(self) -> None:
@@ -234,6 +267,7 @@ class Aplicacao(ctk.CTk):
 
     def _worker_principal(self, chaves: list[str]) -> None:
         pasta = downloads.pasta_downloads()
+        interrompido = False
 
         for idx, acesso in enumerate(chaves, start=1):
             # Pequena pausa entre chaves para respeitar o limite da API.
@@ -253,8 +287,8 @@ class Aplicacao(ctk.CTk):
                 }))
                 continue
 
-            # ---- Consulta na API ----------------------------------------
-            resposta = api_client.consultar_danfe(acesso)
+            # ---- Consulta na API (com renovação de proxies se preciso) ---
+            resposta = self._consultar_com_renovacao(acesso)
 
             if resposta["ok"]:
                 numero = resposta["numero"] or chave.numero_nota_da_chave(acesso)
@@ -294,9 +328,19 @@ class Aplicacao(ctk.CTk):
                     "mensagem": resposta["mensagem"],
                 }))
 
-            # Pequena pausa entre chaves para respeitar o limite da API.
-            if idx < len(chaves):
-                time.sleep(config.DELAY_ENTRE_CHAVES)
+                # Limite "duro" da API (cota diária/IP): não adianta insistir
+                # nas próximas chaves — interrompe o lote imediatamente.
+                if resposta.get("codigo") == "rate_limit_longo":
+                    interrompido = True
+                    for restante in chaves[idx:]:
+                        self._fila.put(("resultado", {
+                            "chave": restante,
+                            "numero": "",
+                            "status": config.STATUS_FALHA,
+                            "mensagem": "Não processada: limite da API atingido.",
+                        }))
+                    self._fila.put(("aviso", resposta["mensagem"]))
+                    break
 
         # ---- Relatório Excel + resumo final ------------------------------
         try:
@@ -306,6 +350,11 @@ class Aplicacao(ctk.CTk):
             mensagem_relatorio = f"Relatório gerado: {caminho_relatorio.name}"
         except OSError as exc:
             mensagem_relatorio = f"Falha ao gerar o relatório Excel: {exc}"
+
+        if interrompido:
+            mensagem_relatorio = (
+                "Execução interrompida por limite da API. " + mensagem_relatorio
+            )
 
         self._fila.put(("finalizar", mensagem_relatorio))
 
@@ -318,6 +367,10 @@ class Aplicacao(ctk.CTk):
 
                 if tipo == "atual":
                     self.lbl_atual.configure(text=evento[1])
+
+                elif tipo == "aviso":
+                    self.lbl_atual.configure(text=evento[1])
+                    self._adicionar_resumo(f"[AVISO] {evento[1]}")
 
                 elif tipo == "resultado":
                     dados = evento[1]

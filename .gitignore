@@ -8,6 +8,7 @@ build/
 .env
 credentials.json
 token.pickle
+proxies.txt
 downloads/
 *.xlsx
 *.log
