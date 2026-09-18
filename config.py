@@ -19,6 +19,7 @@ HEADERS = {
 # Requisições HTTP
 # =============================================================================
 TIMEOUT_SEGUNDOS = 30          # tempo máximo para cada chamada à API
+TIMEOUT_CONEXAO_SEGUNDOS = 10  # tempo de conexão; proxy morto falha rápido
 DELAY_ENTRE_CHAVES = 1.2       # intervalo entre chaves (respeita 60 req/min)
 
 # =============================================================================

@@ -125,6 +125,12 @@ def consultar_danfe(chave: str) -> dict:
     gerenciador = proxies.obter_gerenciador()
     if config.USAR_PROXIES:
         gerenciador.garantir_carregado()
+        if config.TESTAR_PROXIES_NO_INICIO and not gerenciador.podado():
+            antes, depois = gerenciador.podar_mortos()
+            gerenciador.marcar_podado()
+            logger.info(
+                "poda de proxies | antes=%d | depois=%d", antes, depois,
+            )
     trocas_proxy = 0
     ultimo_erro: ErroAPI | None = None
     tentativa = 0
@@ -140,7 +146,7 @@ def consultar_danfe(chave: str) -> dict:
         opcoes: dict = {
             "json": {"chave": chave, "format": "json"},
             "headers": config.HEADERS,
-            "timeout": config.TIMEOUT_SEGUNDOS,
+            "timeout": (config.TIMEOUT_CONEXAO_SEGUNDOS, config.TIMEOUT_SEGUNDOS),
         }
         if proxy_atual:
             opcoes["proxies"] = proxies.normalizar(proxy_atual)

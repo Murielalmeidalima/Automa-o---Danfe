@@ -230,6 +230,7 @@ class GerenciadorProxies:
         self._falhas: dict[str, int] = {}
         self._requisicoes = 0
         self._carregado = False
+        self._podado = False
 
     # -- carga / recarga ------------------------------------------------
     def carregar(self, caminho: str | None = None) -> int:
@@ -240,12 +241,43 @@ class GerenciadorProxies:
             self._falhas = {}
             self._requisicoes = 0
             self._carregado = True
+            self._podado = False
             return len(self._proxies)
 
     def garantir_carregado(self) -> None:
         """Carrega o arquivo uma única vez, de forma preguiçosa."""
         if not self._carregado:
             self.carregar()
+
+    def podado(self) -> bool:
+        with self._lock:
+            return self._podado
+
+    def marcar_podado(self) -> None:
+        with self._lock:
+            self._podado = True
+
+    def podar_mortos(self, timeout: float | None = None) -> tuple[int, int]:
+        """Testa todos os proxies carregados e remove os que não respondem.
+
+        Returns:
+            (total_antes, total_aplicados) — quantos havia e quantos restaram.
+        """
+        with self._lock:
+            candidatos = list(self._proxies)
+        if not candidatos:
+            return 0, 0
+
+        resultados = _testar_paralelo(candidatos, validar, timeout or config.TIMEOUT_TESTE_PROXY)
+        vivos = [proxy for proxy, ok, _ in resultados if ok]
+
+        with self._lock:
+            if self._proxies:
+                self._proxies = vivos
+                self._indice = 0
+                self._falhas = {}
+                self._requisicoes = 0
+        return len(candidatos), len(vivos)
 
     # -- consultas ------------------------------------------------------
     def total(self) -> int:
